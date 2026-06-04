@@ -35,18 +35,27 @@ writes, scope network hosts, and require confirmation for destructive operations
 ## Features
 
 - Rule model with `tool(specifier)` parsing, mirroring Claude Code's `settings.json` permissions.
-- Path matching with traversal-safe normalization, command-prefix matching with argument boundaries,
-  and host/domain matching.
+- Path matching with traversal-safe lexical normalization, command-prefix matching with argument
+  boundaries, host/domain matching, and **symlink-aware deny** (a symlink in an allowed directory cannot
+  reach a denied secret).
 - A fail-closed shell command splitter so `git status && rm -rf /` cannot inherit an allow granted to
-  `git status`.
-- A precedence model where Deny is absolute, otherwise the highest-precedence layer wins, otherwise a
+  `git status` — with **`bash -c` unwrapping**, **benign-wrapper stripping** (`timeout`, `nice`, `env`,
+  …), **command-substitution surfacing**, **redirection detection**, and shell-function/fork-bomb
+  rejection.
+- A built-in **command classifier**: known read-only commands auto-allow on fallback, while dangerous
+  commands (`rm -rf`, `sudo`, interpreters, `dd`, …) and output redirection raise a safety floor of Ask
+  over broad allows. Argument-audited so `git -c`, `find -exec`, `sed -i`, `rg --pre` are not "safe".
+- A precedence model where **Deny is absolute**, otherwise the highest-precedence layer wins, otherwise a
   tool-metadata fallback.
-- Layered, corruption-resilient file store: builtin, user, project, local, session, and injected layers
-  with atomic writes.
+- Layered, corruption-resilient file store: **managed** (admin, uncoverable), user, project, local,
+  session, and injected layers with atomic writes.
 - A pluggable consent seam (`IPermissionPrompt`) with a non-interactive provider for headless and
-  container use (fail-closed or bypass).
+  container use (fail-closed or bypass), and **reject-with-feedback** surfaced back to the model.
 - A decorating `IToolExecutor` that enforces decisions in front of any executor, plus dependency
   injection helpers and a container bootstrap driven by environment variables.
+
+The full cross-tool best-of-breed specification and gap analysis is in
+[`docs/permission-spec.md`](docs/permission-spec.md).
 
 ## Requirements
 

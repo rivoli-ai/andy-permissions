@@ -122,7 +122,15 @@ public sealed class PermissionedToolExecutor : IToolExecutor
 
             await PersistAsync(toolId, evaluation, decision, cancellationToken).ConfigureAwait(false);
 
-            return decision.Allowed ? null : Denied(toolId, context, evaluation, "denied by consent");
+            if (decision.Allowed)
+            {
+                return null;
+            }
+
+            var reason = string.IsNullOrWhiteSpace(decision.Feedback)
+                ? "denied by consent"
+                : $"denied by consent: {decision.Feedback}";
+            return Denied(toolId, context, evaluation, reason);
         }
         finally
         {

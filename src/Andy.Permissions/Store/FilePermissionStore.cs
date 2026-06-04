@@ -42,6 +42,7 @@ public sealed class FilePermissionStore : IPermissionStore
             fileRules.AddRange(RuleSetDocument.LoadFromFile(_options.UserFilePath, PermissionLayer.User));
             fileRules.AddRange(RuleSetDocument.LoadFromFile(_options.ProjectFilePath, PermissionLayer.Project));
             fileRules.AddRange(RuleSetDocument.LoadFromFile(_options.LocalFilePath, PermissionLayer.Local));
+            fileRules.AddRange(RuleSetDocument.LoadFromFile(_options.ManagedFilePath, PermissionLayer.Managed));
             _fileAndBuiltin = fileRules;
             RebuildMerged();
         }
