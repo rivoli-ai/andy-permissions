@@ -71,6 +71,10 @@ dotnet test
 
 ## Container usage
 
+See [`docs/container-usage.md`](docs/container-usage.md) for the full guide (Docker examples, rules
+format, modes) and [`examples/permissions.container.json`](examples/permissions.container.json) for a
+ready-to-mount rules file.
+
 For unattended runs, inject the rules up front so no consent is ever requested:
 
 - `ANDY_PERMISSIONS_FILE` - path to a JSON rules file to load as the highest-precedence layer.
