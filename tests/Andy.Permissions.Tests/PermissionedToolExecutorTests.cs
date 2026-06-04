@@ -142,6 +142,20 @@ public class PermissionedToolExecutorTests
     }
 
     [Fact]
+    public async Task Reject_with_feedback_surfaces_in_the_tool_error()
+    {
+        var store = new ListPermissionStore().Add("write_file(*)", PermissionOutcome.Ask, PermissionLayer.User);
+        var inner = new FakeInnerExecutor { ThrowIfExecuted = true };
+        var prompt = new RecordingPrompt(new PermissionDecision(false, PersistScope.Once, Feedback: "use the API instead"));
+        var sut = Build(store, inner, prompt);
+
+        var result = await sut.ExecuteAsync("write_file", P(("file_path", "/tmp/x")), Ctx());
+
+        Assert.False(result.IsSuccessful);
+        Assert.Contains("use the API instead", result.ErrorMessage!);
+    }
+
+    [Fact]
     public void Forwards_non_execute_members_and_reraises_events()
     {
         var store = new ListPermissionStore();

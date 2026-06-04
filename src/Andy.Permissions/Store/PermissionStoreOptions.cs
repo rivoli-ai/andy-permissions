@@ -8,6 +8,12 @@ namespace Andy.Permissions.Store;
 /// </summary>
 public sealed class PermissionStoreOptions
 {
+    /// <summary>
+    /// Admin/enterprise-managed file (highest precedence; a managed Deny is uncoverable). Null by default
+    /// (opt-in); a host can point this at a system path such as <c>/etc/andy/permissions.managed.json</c>.
+    /// </summary>
+    public string? ManagedFilePath { get; set; }
+
     /// <summary>Per-user file, default <c>~/.andy/permissions.json</c>.</summary>
     public string? UserFilePath { get; set; } = DefaultUserFilePath();
 

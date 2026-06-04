@@ -7,7 +7,11 @@ namespace Andy.Permissions.Model;
 /// </summary>
 /// <param name="Allowed">True to permit the action, false to deny it.</param>
 /// <param name="Persist">Whether/where to remember this decision for future calls.</param>
-public sealed record PermissionDecision(bool Allowed, PersistScope Persist = PersistScope.Once)
+/// <param name="Feedback">
+/// Optional free-text the user supplied when denying ("reject with feedback"), surfaced back to the model
+/// in the tool error so it can adapt (Kimi/opencode pattern).
+/// </param>
+public sealed record PermissionDecision(bool Allowed, PersistScope Persist = PersistScope.Once, string? Feedback = null)
 {
     /// <summary>A one-off deny (used as the safe default by non-interactive providers).</summary>
     public static PermissionDecision DenyOnce { get; } = new(false, PersistScope.Once);

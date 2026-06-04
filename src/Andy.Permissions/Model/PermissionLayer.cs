@@ -22,6 +22,12 @@ public enum PermissionLayer
     /// <summary>In-memory "allow for this run only" decisions.</summary>
     Session = 4,
 
-    /// <summary>Container/CLI bootstrap rules injected at startup; highest precedence (RD9).</summary>
+    /// <summary>Container/CLI bootstrap rules injected at startup (RD9).</summary>
     Injected = 5,
+
+    /// <summary>
+    /// Admin/enterprise-managed rules (e.g. a system <c>permissions.managed.json</c>). Highest precedence.
+    /// Because Deny is absolute, a managed Deny can never be overridden by any lower layer (lockdown).
+    /// </summary>
+    Managed = 6,
 }

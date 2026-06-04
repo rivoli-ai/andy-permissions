@@ -88,6 +88,41 @@ public static class SpecifierMatcher
         return CollapseDotSegments(expanded);
     }
 
+    /// <summary>
+    /// Resolves a path's real (symlink-followed) location, normalized, or null if it doesn't exist or
+    /// can't be resolved. Used for symlink-aware Deny matching (so a symlink inside an allowed directory
+    /// that points at a denied secret is still blocked).
+    /// </summary>
+    public static string? ResolveRealPath(string value, string? workingDirectory)
+    {
+        var norm = NormalizeConcretePath(value, workingDirectory);
+        if (norm is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            if (File.Exists(norm))
+            {
+                var fi = new FileInfo(norm);
+                return UnifySeparators(fi.ResolveLinkTarget(returnFinalTarget: true)?.FullName ?? fi.FullName);
+            }
+
+            if (Directory.Exists(norm))
+            {
+                var di = new DirectoryInfo(norm);
+                return UnifySeparators(di.ResolveLinkTarget(returnFinalTarget: true)?.FullName ?? di.FullName);
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
+        {
+            return null;
+        }
+
+        return null;
+    }
+
     private static string ExpandHome(string path)
     {
         if (path == "~")
