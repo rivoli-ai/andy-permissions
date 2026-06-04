@@ -49,9 +49,12 @@ public static class SpecifierMatcher
     }
 
     /// <summary>
-    /// Fully normalizes a concrete path: expand <c>~</c>, resolve relative against the working dir, then
-    /// <see cref="Path.GetFullPath(string)"/> to collapse <c>.</c>/<c>..</c>/duplicate separators, and
-    /// unify separators to '/'. Returns null on an unusable path.
+    /// Normalizes a concrete path <em>lexically</em> (deterministic across OSes, no filesystem access):
+    /// expand <c>~</c>, unify separators to '/', resolve relative against the working dir, and collapse
+    /// <c>.</c>/<c>..</c>/duplicate separators. We deliberately avoid <see cref="Path.GetFullPath(string)"/>
+    /// because it is platform-dependent (a POSIX-style <c>/etc</c> becomes <c>C:\etc</c> on Windows), which
+    /// would make rule matching differ by OS. Returns null on an unusable path. Note: symlinks are not
+    /// resolved (matching is on the textual path; the tool re-checks at I/O time — see C1/TOCTOU).
     /// </summary>
     public static string? NormalizeConcretePath(string value, string? workingDirectory)
     {
@@ -60,19 +63,7 @@ public static class SpecifierMatcher
             return null;
         }
 
-        try
-        {
-            var expanded = ExpandHome(value);
-            var baseDir = string.IsNullOrEmpty(workingDirectory)
-                ? Directory.GetCurrentDirectory()
-                : ExpandHome(workingDirectory!);
-            var combined = Path.IsPathRooted(expanded) ? expanded : Path.Combine(baseDir, expanded);
-            return UnifySeparators(Path.GetFullPath(combined));
-        }
-        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
-        {
-            return null;
-        }
+        return NormalizeSpecifierPath(value, workingDirectory);
     }
 
     /// <summary>
