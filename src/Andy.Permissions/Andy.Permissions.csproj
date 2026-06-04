@@ -3,7 +3,7 @@
   <PropertyGroup>
     <PackageId>Andy.Permissions</PackageId>
     <Title>Andy Permissions</Title>
-    <Description>Tool permission / consent system for the Andy stack: Allow/Ask/Deny rule evaluation, layered persistence, and a decorating tool executor that gates Andy.Tools execution.</Description>
+    <Description>Tool permission / consent system for the Andy stack: Allow/Ask/Deny rule evaluation, layered persistence, and an IToolPermissionGate that Andy.Tools' executor consults before running a tool.</Description>
     <PackageTags>llm;tools;permissions;security;consent</PackageTags>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
@@ -14,7 +14,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Andy.Tools" Version="2025.10.16-rc.16" />
+    <PackageReference Include="Andy.Tools" Version="2026.6.4-rc.24" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="8.0.2" />
   </ItemGroup>
 

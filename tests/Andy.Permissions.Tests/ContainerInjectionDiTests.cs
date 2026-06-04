@@ -9,8 +9,9 @@ namespace Andy.Permissions.Tests;
 
 /// <summary>
 /// End-to-end container tests through the real <c>AddAndyPermissions</c> DI wiring + environment-driven
-/// injection bootstrap (RD9). Mutates process env, so all tests here run in one non-parallel collection
-/// and restore env in a finally.
+/// injection bootstrap (RD9), exercised via the registered <see cref="IToolPermissionGate"/> (the seam
+/// Andy.Tools' ToolExecutor calls). Mutates process env, so these run in one non-parallel collection and
+/// restore env in a finally.
 /// </summary>
 [CollectionDefinition("env-mutating", DisableParallelization = true)]
 public sealed class EnvMutatingCollection { }
@@ -18,7 +19,7 @@ public sealed class EnvMutatingCollection { }
 [Collection("env-mutating")]
 public sealed class ContainerInjectionDiTests
 {
-    private static async Task WithEnv(string? json, string? mode, Func<IToolExecutor, FakeInnerExecutor, RecordingPrompt?, Task> body, bool registerCountingPrompt)
+    private static async Task WithEnv(string? json, string? mode, RecordingPrompt? prompt, Func<IToolPermissionGate, Task> body)
     {
         var prevJson = Environment.GetEnvironmentVariable(PermissionInjectionBootstrap.JsonEnvVar);
         var prevMode = Environment.GetEnvironmentVariable(PermissionInjectionBootstrap.ModeEnvVar);
@@ -29,23 +30,17 @@ public sealed class ContainerInjectionDiTests
             Environment.SetEnvironmentVariable(PermissionInjectionBootstrap.JsonEnvVar, json);
             Environment.SetEnvironmentVariable(PermissionInjectionBootstrap.ModeEnvVar, mode);
 
-            var inner = new FakeInnerExecutor();
-            RecordingPrompt? prompt = registerCountingPrompt ? new RecordingPrompt(PermissionDecision.DenyOnce) : null;
-
             var services = new ServiceCollection();
-            services.AddSingleton<IToolExecutor>(inner);                 // the "real" executor we decorate
             if (prompt is not null)
             {
-                services.AddSingleton<IPermissionPrompt>(prompt);        // count prompts; must be registered before AddAndyPermissions
+                services.AddSingleton<IPermissionPrompt>(prompt);   // registered before AddAndyPermissions (TryAdd)
             }
 
-            services.AddAndyPermissions(o => o.UserFilePath = null);     // no user file; injection drives policy
+            services.AddAndyPermissions(o => o.UserFilePath = null); // injection drives policy
 
             await using var sp = services.BuildServiceProvider();
-            var executor = sp.GetRequiredService<IToolExecutor>();
-            Assert.IsType<Andy.Permissions.Execution.PermissionedToolExecutor>(executor);
-
-            await body(executor, inner, prompt);
+            var gate = sp.GetRequiredService<IToolPermissionGate>();
+            await body(gate);
         }
         finally
         {
@@ -55,33 +50,36 @@ public sealed class ContainerInjectionDiTests
         }
     }
 
-    private static Dictionary<string, object?> P(params (string, object?)[] kv) => kv.ToDictionary(x => x.Item1, x => x.Item2);
+    private static ToolPermissionGateRequest Req(string toolId, params (string, object?)[] kv) => new()
+    {
+        ToolId = toolId,
+        Parameters = kv.ToDictionary(x => x.Item1, x => x.Item2),
+        Context = new ToolExecutionContext(),
+    };
 
     [Fact]
     public async Task Injected_allows_run_with_zero_prompts()
     {
         var json = """{ "allow": ["read_file(*)", "write_file(*)", "execute_command(*)"] }""";
-        await WithEnv(json, mode: null, registerCountingPrompt: true, body: async (exec, inner, prompt) =>
+        var prompt = new RecordingPrompt(PermissionDecision.DenyOnce); // would block if ever consulted
+        await WithEnv(json, mode: null, prompt, async gate =>
         {
-            await exec.ExecuteAsync("read_file", P(("file_path", "/tmp/a")));
-            await exec.ExecuteAsync("write_file", P(("file_path", "/tmp/b")));
-            await exec.ExecuteAsync("execute_command", P(("command", "ls -la")));
+            Assert.True((await gate.CheckAsync(Req("read_file", ("file_path", "/tmp/a")))).Allowed);
+            Assert.True((await gate.CheckAsync(Req("write_file", ("file_path", "/tmp/b")))).Allowed);
+            Assert.True((await gate.CheckAsync(Req("execute_command", ("command", "ls -la")))).Allowed);
 
-            Assert.Equal(3, inner.ExecuteCount);
-            Assert.Equal(0, prompt!.CallCount);   // the headline guarantee: inject first, never ask
+            Assert.Equal(0, prompt.CallCount); // inject first, never ask
         });
     }
 
     [Fact]
     public async Task Fail_closed_denies_uncovered_ask_without_a_tty()
     {
-        // An injected Ask with no interactive prompt and default (fail-closed) mode ⇒ denied.
         var json = """{ "ask": ["execute_command(*)"] }""";
-        await WithEnv(json, mode: null, registerCountingPrompt: false, body: async (exec, inner, _) =>
+        await WithEnv(json, mode: null, prompt: null, body: async gate =>
         {
-            var result = await exec.ExecuteAsync("execute_command", P(("command", "npm run deploy")));
-            Assert.False(result.IsSuccessful);
-            Assert.Equal(0, inner.ExecuteCount);
+            var verdict = await gate.CheckAsync(Req("execute_command", ("command", "npm run deploy")));
+            Assert.False(verdict.Allowed);
         });
     }
 
@@ -89,15 +87,10 @@ public sealed class ContainerInjectionDiTests
     public async Task Bypass_allows_ask_but_still_respects_deny()
     {
         var json = """{ "ask": ["execute_command(*)"], "deny": ["execute_command(npm run deploy:*)"] }""";
-        await WithEnv(json, mode: "bypass", registerCountingPrompt: false, body: async (exec, inner, _) =>
+        await WithEnv(json, mode: "bypass", prompt: null, body: async gate =>
         {
-            var allowed = await exec.ExecuteAsync("execute_command", P(("command", "npm run test")));
-            Assert.True(allowed.IsSuccessful);            // Ask ⇒ Allow under bypass
-
-            var denied = await exec.ExecuteAsync("execute_command", P(("command", "npm run deploy")));
-            Assert.False(denied.IsSuccessful);            // Deny is never collapsed by bypass
+            Assert.True((await gate.CheckAsync(Req("execute_command", ("command", "npm run test")))).Allowed);
+            Assert.False((await gate.CheckAsync(Req("execute_command", ("command", "npm run deploy")))).Allowed);
         });
-
-        // inner ran exactly once (the allowed call)
     }
 }

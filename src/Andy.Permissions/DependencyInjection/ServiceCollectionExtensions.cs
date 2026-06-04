@@ -48,14 +48,17 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton<IPermissionPrompt>(_ =>
             new NonInteractivePermissionPrompt(PermissionInjectionBootstrap.ResolveMode()));
 
-        DecorateToolExecutor(services);
+        // Phase 5: register the consent gate. Andy.Tools' ToolExecutor resolves IToolPermissionGate and
+        // calls it before executing any tool, so no executor decoration is needed.
+        services.TryAddSingleton<IToolPermissionGate, ToolPermissionGate>();
         return services;
     }
 
     /// <summary>
     /// Replaces the registered <see cref="IToolExecutor"/> with a <see cref="PermissionedToolExecutor"/>
-    /// wrapping the original. No-op if no <see cref="IToolExecutor"/> is registered yet (call after
-    /// <c>AddAndyTools</c>).
+    /// wrapping the original. No-op if no <see cref="IToolExecutor"/> is registered yet. Retained for hosts
+    /// running an executor that does not support the built-in <see cref="IToolPermissionGate"/>; prefer the
+    /// gate (registered by <see cref="AddAndyPermissions"/>) instead.
     /// </summary>
     public static void DecorateToolExecutor(IServiceCollection services)
     {
