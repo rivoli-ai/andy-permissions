@@ -1,5 +1,4 @@
 using Andy.Permissions.Authorization;
-using Andy.Permissions.Model;
 using Andy.Permissions.Prompt;
 using Andy.Permissions.Store;
 using Andy.Tools.Core;
@@ -7,20 +6,21 @@ using Andy.Tools.Core;
 namespace Andy.Permissions.Execution;
 
 /// <summary>
-/// An <see cref="IToolExecutor"/> decorator that gates every execution through the permission authorizer
-/// (RD2) before delegating to the inner executor. Allow ⇒ delegate; Deny ⇒ synthesize a failure
-/// <see cref="ToolExecutionResult"/> (RD3, the agent can adapt); Ask ⇒ consult the prompt under a
-/// serialization lock with a re-check (RD4). Implements the full <see cref="IToolExecutor"/> surface,
-/// forwarding non-execute members and re-raising the inner's events (RD6).
+/// An <see cref="IToolExecutor"/> decorator that gates every execution through a
+/// <see cref="ToolPermissionGate"/> before delegating to the inner executor. Allow ⇒ delegate; Deny ⇒
+/// synthesize a failure <see cref="ToolExecutionResult"/> (the agent can adapt). Implements the full
+/// <see cref="IToolExecutor"/> surface, forwarding non-execute members and re-raising the inner's events.
 /// </summary>
+/// <remarks>
+/// As of Phase 5, the preferred integration is to register a <see cref="IToolPermissionGate"/> and let
+/// <c>Andy.Tools</c>' <c>ToolExecutor</c> call it directly. This decorator remains for hosts running an
+/// executor that does not yet support the built-in gate.
+/// </remarks>
 public sealed class PermissionedToolExecutor : IToolExecutor
 {
     private readonly IToolExecutor _inner;
-    private readonly IToolPermissionAuthorizer _authorizer;
-    private readonly IPermissionPrompt _prompt;
-    private readonly IPermissionStore _store;
+    private readonly IToolPermissionGate _gate;
     private readonly IToolRegistry? _registry;
-    private readonly SemaphoreSlim _promptGate = new(1, 1);
 
     public PermissionedToolExecutor(
         IToolExecutor inner,
@@ -28,11 +28,14 @@ public sealed class PermissionedToolExecutor : IToolExecutor
         IPermissionPrompt prompt,
         IPermissionStore store,
         IToolRegistry? registry = null)
+        : this(inner, new ToolPermissionGate(authorizer, prompt, store), registry)
+    {
+    }
+
+    public PermissionedToolExecutor(IToolExecutor inner, IToolPermissionGate gate, IToolRegistry? registry = null)
     {
         _inner = inner ?? throw new ArgumentNullException(nameof(inner));
-        _authorizer = authorizer ?? throw new ArgumentNullException(nameof(authorizer));
-        _prompt = prompt ?? throw new ArgumentNullException(nameof(prompt));
-        _store = store ?? throw new ArgumentNullException(nameof(store));
+        _gate = gate ?? throw new ArgumentNullException(nameof(gate));
         _registry = registry;
 
         _inner.ExecutionStarted += (_, e) => ExecutionStarted?.Invoke(this, e);
@@ -61,128 +64,32 @@ public sealed class PermissionedToolExecutor : IToolExecutor
         return gate ?? await _inner.ExecuteAsync(toolId, parameters, context).ConfigureAwait(false);
     }
 
-    /// <summary>
-    /// Runs the consent gate. Returns null when the call may proceed to the inner executor, or a
-    /// synthesized failure result when it is denied.
-    /// </summary>
+    /// <summary>Returns null to proceed, or a synthesized failure result when denied.</summary>
     private async Task<ToolExecutionResult?> GateAsync(
         string toolId,
         IReadOnlyDictionary<string, object?> parameters,
         ToolExecutionContext? context,
         CancellationToken cancellationToken)
     {
-        var authContext = new ToolAuthorizationContext(
-            toolId,
-            parameters,
-            context?.WorkingDirectory,
-            _registry?.GetTool(toolId)?.Metadata);
+        var verdict = await _gate.CheckAsync(
+            new ToolPermissionGateRequest
+            {
+                ToolId = toolId,
+                Parameters = parameters,
+                Context = context ?? new ToolExecutionContext(),
+                Metadata = _registry?.GetTool(toolId)?.Metadata,
+            },
+            cancellationToken).ConfigureAwait(false);
 
-        var evaluation = _authorizer.Evaluate(authContext);
-
-        if (evaluation.Outcome == PermissionOutcome.Allow)
+        if (verdict.Allowed)
         {
             return null;
         }
 
-        if (evaluation.Outcome == PermissionOutcome.Deny)
-        {
-            return Denied(toolId, context, evaluation);
-        }
-
-        // Ask — serialize prompts and re-check under the lock (RD4).
-        await _promptGate.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
-        {
-            evaluation = _authorizer.Evaluate(authContext);
-            if (evaluation.Outcome == PermissionOutcome.Allow)
-            {
-                return null;
-            }
-
-            if (evaluation.Outcome == PermissionOutcome.Deny)
-            {
-                return Denied(toolId, context, evaluation);
-            }
-
-            if (cancellationToken.IsCancellationRequested)
-            {
-                return Denied(toolId, context, evaluation, "cancelled before consent");
-            }
-
-            PermissionDecision decision;
-            try
-            {
-                var request = BuildRequest(toolId, evaluation);
-                decision = await _prompt.RequestAsync(request, cancellationToken).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException)
-            {
-                return Denied(toolId, context, evaluation, "consent cancelled");
-            }
-
-            await PersistAsync(toolId, evaluation, decision, cancellationToken).ConfigureAwait(false);
-
-            if (decision.Allowed)
-            {
-                return null;
-            }
-
-            var reason = string.IsNullOrWhiteSpace(decision.Feedback)
-                ? "denied by consent"
-                : $"denied by consent: {decision.Feedback}";
-            return Denied(toolId, context, evaluation, reason);
-        }
-        finally
-        {
-            _promptGate.Release();
-        }
-    }
-
-    private async Task PersistAsync(string toolId, PermissionEvaluation evaluation, PermissionDecision decision, CancellationToken ct)
-    {
-        if (decision.Persist == PersistScope.Once)
-        {
-            return;
-        }
-
-        var outcome = decision.Allowed ? PermissionOutcome.Allow : PermissionOutcome.Deny;
-        foreach (var resource in evaluation.Resources.Where(r => r.Outcome == PermissionOutcome.Ask))
-        {
-            var specifier = ToSpecifier(resource.Access);
-            await _store.AppendRuleAsync(toolId, specifier, outcome, decision.Persist, ct).ConfigureAwait(false);
-        }
-    }
-
-    private static string ToSpecifier(ResourceAccess access) => access.Kind switch
-    {
-        ResourceKind.Command => $"{access.Value}:*",
-        ResourceKind.Host => $"domain:{access.Value}",
-        ResourceKind.Path => access.Value,
-        _ => "*",
-    };
-
-    private static PermissionRequest BuildRequest(string toolId, PermissionEvaluation evaluation)
-    {
-        var asked = evaluation.Resources.Where(r => r.Outcome == PermissionOutcome.Ask).ToList();
-        var summary = asked.Count == 0
-            ? $"{toolId} requires permission"
-            : $"{toolId}: " + string.Join(", ", asked.Select(r => $"{r.Access.Kind} '{r.Access.Value}'"));
-        return new PermissionRequest(toolId, toolId, summary, evaluation);
-    }
-
-    private ToolExecutionResult Denied(string toolId, ToolExecutionContext? context, PermissionEvaluation evaluation, string? extra = null)
-    {
         var correlationId = string.IsNullOrEmpty(context?.CorrelationId)
             ? Guid.NewGuid().ToString("N")[..8]
             : context!.CorrelationId;
-
-        var offending = evaluation.Resources.FirstOrDefault(r => r.Outcome == PermissionOutcome.Deny)
-                        ?? evaluation.Resources.FirstOrDefault(r => r.Outcome == PermissionOutcome.Ask);
-        var detail = offending is null
-            ? string.Empty
-            : $" ({offending.Access.Kind} '{offending.Access.Value}')";
-        var reason = $"Tool '{toolId}' blocked by permission policy{detail}"
-                     + (extra is null ? string.Empty : $": {extra}");
+        var reason = verdict.Reason ?? $"Tool '{toolId}' blocked by permission policy";
 
         var result = new ToolExecutionResult
         {
