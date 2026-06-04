@@ -1,0 +1,97 @@
+# Andy.Permissions
+
+A Claude-Code / opencode style tool permission and consent system for the Andy stack. It gates
+`Andy.Tools` executions through an Allow / Ask / Deny rule engine with layered, file-backed
+persistence, and supports injecting permissions up front so unattended container runs never prompt.
+
+Repository: https://github.com/rivoli-ai/andy-permissions
+
+> ALPHA RELEASE WARNING
+>
+> This software is in ALPHA stage. NO GUARANTEES are made about its functionality, stability, or safety.
+>
+> CRITICAL WARNINGS:
+> - APIs, schemas, and storage formats may change without notice between releases.
+> - Permission evaluation and enforcement are NOT FULLY TESTED for security-critical use.
+> - DO NOT USE in production environments.
+> - DO NOT rely on this as the sole control protecting sensitive files, credentials, or systems.
+> - The authors assume NO RESPONSIBILITY for unauthorized access, data loss, or security breaches.
+>
+> USE AT YOUR OWN RISK.
+
+## Overview
+
+`Andy.Permissions` decides whether a tool call may proceed, by matching it against a merged set of
+rules. Rules use the familiar `tool(specifier)` form (for example `read_file(~/.ssh/**)` or
+`bash_command(git status:*)`) and resolve to one of three outcomes:
+
+- `Allow` - proceed without prompting.
+- `Ask` - request consent from the host (interactive prompt, container policy, or remote broker).
+- `Deny` - block the call. Deny is absolute and is never overridden by an Allow in any layer.
+
+Permissions apply to every tool, not just shell commands: you can ban reads of a directory, restrict
+writes, scope network hosts, and require confirmation for destructive operations.
+
+## Features
+
+- Rule model with `tool(specifier)` parsing, mirroring Claude Code's `settings.json` permissions.
+- Path matching with traversal-safe normalization, command-prefix matching with argument boundaries,
+  and host/domain matching.
+- A fail-closed shell command splitter so `git status && rm -rf /` cannot inherit an allow granted to
+  `git status`.
+- A precedence model where Deny is absolute, otherwise the highest-precedence layer wins, otherwise a
+  tool-metadata fallback.
+- Layered, corruption-resilient file store: builtin, user, project, local, session, and injected layers
+  with atomic writes.
+- A pluggable consent seam (`IPermissionPrompt`) with a non-interactive provider for headless and
+  container use (fail-closed or bypass).
+- A decorating `IToolExecutor` that enforces decisions in front of any executor, plus dependency
+  injection helpers and a container bootstrap driven by environment variables.
+
+## Requirements
+
+- .NET 8.0 SDK
+
+## Build and test
+
+```bash
+dotnet restore
+dotnet build
+dotnet test
+```
+
+## Container usage
+
+For unattended runs, inject the rules up front so no consent is ever requested:
+
+- `ANDY_PERMISSIONS_FILE` - path to a JSON rules file to load as the highest-precedence layer.
+- `ANDY_PERMISSIONS_JSON` - inline JSON rules (used when no file is set).
+- `ANDY_PERMISSION_MODE` - `fail-closed` (default; denies anything not pre-allowed) or `bypass`
+  (turns Ask into Allow; never affects Deny).
+
+Rules file shape:
+
+```json
+{
+  "allow": ["read_file(/workspace/**)", "bash_command(git:*)"],
+  "ask":   ["write_file(/workspace/**)"],
+  "deny":  ["read_file(~/.ssh/**)"]
+}
+```
+
+## Project layout
+
+```
+src/Andy.Permissions/         The library (depends on Andy.Tools)
+tests/Andy.Permissions.Tests/ xUnit test suite
+```
+
+## Design
+
+The full design, review resolutions, and test matrix live in the `andy-engine` repository at
+`docs/permissions-design.md`. Cross-repo work is tracked in the epic `rivoli-ai/andy-engine#5`.
+
+## License
+
+This project is licensed under the Apache License, Version 2.0. See the [LICENSE](LICENSE) file for
+details.
