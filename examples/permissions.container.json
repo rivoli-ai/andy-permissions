@@ -1,0 +1,26 @@
+{
+  "_comment": "Example injected rules for a containerized agent. Mount and set ANDY_PERMISSIONS_FILE to this path, or pass its contents via ANDY_PERMISSIONS_JSON. See docs/container-usage.md.",
+  "allow": [
+    "read_file(/workspace/**)",
+    "write_file(/workspace/**)",
+    "delete_file(/workspace/**)",
+    "move_file(/workspace/**)",
+    "copy_file(/workspace/**)",
+    "list_directory(/workspace/**)",
+    "search_text(/workspace/**)",
+    "execute_command(git:*)",
+    "execute_command(npm:*)",
+    "execute_command(dotnet:*)",
+    "execute_command(ls:*)",
+    "execute_command(cat:*)",
+    "http_request(domain:registry.npmjs.org)",
+    "http_request(domain:api.nuget.org)"
+  ],
+  "ask": [],
+  "deny": [
+    "read_file(~/.ssh/**)",
+    "read_file(~/.aws/**)",
+    "execute_command(rm -rf /:*)",
+    "execute_command(sudo:*)"
+  ]
+}
