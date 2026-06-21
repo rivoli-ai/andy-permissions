@@ -11,12 +11,25 @@ public sealed class DefaultToolActionResolver : IToolActionResolver
 {
     private sealed record ParamRole(string ParameterName, ResourceKind Kind);
 
+    // Single-file tools take the path under any of these parameter names. Listing the common aliases
+    // (not just "file_path") keeps the resolved resource - and therefore the file name shown in the
+    // permission prompt - present even when the call uses an alternate name, instead of degrading to
+    // a "None" resource. Resolve() de-duplicates, so at most one Path resource results per call.
+    private static readonly ParamRole[] FilePathRoles =
+    [
+        new("file_path", ResourceKind.Path),
+        new("path", ResourceKind.Path),
+        new("filepath", ResourceKind.Path),
+        new("filename", ResourceKind.Path),
+        new("file", ResourceKind.Path),
+    ];
+
     private readonly Dictionary<string, ParamRole[]> _map = new(StringComparer.Ordinal)
     {
-        ["read_file"] = [new("file_path", ResourceKind.Path)],
-        ["write_file"] = [new("file_path", ResourceKind.Path)],
-        ["delete_file"] = [new("file_path", ResourceKind.Path)],
-        ["file_editor"] = [new("file_path", ResourceKind.Path)],
+        ["read_file"] = FilePathRoles,
+        ["write_file"] = FilePathRoles,
+        ["delete_file"] = FilePathRoles,
+        ["file_editor"] = FilePathRoles,
         ["list_directory"] = [new("path", ResourceKind.Path), new("directory_path", ResourceKind.Path)],
         ["search_text"] = [new("path", ResourceKind.Path), new("directory_path", ResourceKind.Path)],
         ["file_search"] = [new("path", ResourceKind.Path), new("directory_path", ResourceKind.Path)],
@@ -43,6 +56,7 @@ public sealed class DefaultToolActionResolver : IToolActionResolver
         }
 
         var result = new List<ResourceAccess>();
+        var seen = new HashSet<(ResourceKind, string)>();
         foreach (var role in roles)
         {
             var raw = GetString(parameters, role.ParameterName);
@@ -54,12 +68,12 @@ public sealed class DefaultToolActionResolver : IToolActionResolver
             if (role.Kind == ResourceKind.Host)
             {
                 var host = ExtractHost(raw);
-                if (!string.IsNullOrEmpty(host))
+                if (!string.IsNullOrEmpty(host) && seen.Add((ResourceKind.Host, host!)))
                 {
                     result.Add(new ResourceAccess(ResourceKind.Host, host!));
                 }
             }
-            else
+            else if (seen.Add((role.Kind, raw)))
             {
                 result.Add(new ResourceAccess(role.Kind, raw));
             }
