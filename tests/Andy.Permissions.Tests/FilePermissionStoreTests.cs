@@ -24,6 +24,7 @@ public sealed class FilePermissionStoreTests : IDisposable
         UserFilePath = Path.Combine(_dir, "user.json"),
         ProjectFilePath = Path.Combine(_dir, "project.json"),
         LocalFilePath = Path.Combine(_dir, "local.json"),
+        ManagedFilePath = Path.Combine(_dir, "managed.json"), // keep hermetic (don't read the system default)
         Builtin = Array.Empty<PermissionRule>(),
     };
 

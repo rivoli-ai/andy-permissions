@@ -16,7 +16,10 @@ public sealed class FilePermissionStore : IPermissionStore
     private List<PermissionRule> _fileAndBuiltin = [];   // builtin + user + project + local (from disk)
     private readonly List<PermissionRule> _session = [];
     private List<PermissionRule> _injected = [];
-    private List<PermissionRule> _merged = [];
+
+    // A read-only snapshot rebuilt (never mutated in place) on every change, so GetRules can hand it out
+    // directly: it is O(1), thread-safe, and callers cannot cast it back to a List and mutate policy (#9).
+    private IReadOnlyList<PermissionRule> _merged = Array.Empty<PermissionRule>();
 
     public FilePermissionStore(PermissionStoreOptions? options = null)
     {
@@ -29,6 +32,8 @@ public sealed class FilePermissionStore : IPermissionStore
     {
         lock (_lock)
         {
+            // _merged is a ReadOnlyCollection wrapping a list this store never mutates again, so returning
+            // it directly is safe: it is an immutable snapshot the caller cannot use to alter store state.
             return _merged;
         }
     }
@@ -51,6 +56,20 @@ public sealed class FilePermissionStore : IPermissionStore
     /// <inheritdoc />
     public Task AppendRuleAsync(string toolId, string specifier, PermissionOutcome outcome, PersistScope scope, CancellationToken cancellationToken = default)
     {
+        // Enforce the documented tool-id grammar (snake_case or "*") up front so a malformed id can never
+        // be written to disk as a dead rule (#8). This is a programmer error, so it throws synchronously.
+        if (!PermissionRule.IsValidToolId(toolId))
+        {
+            throw new ArgumentException(
+                $"Invalid tool id '{toolId}'; expected snake_case (e.g. 'read_file') or '*'.", nameof(toolId));
+        }
+
+        // Cancellation is observed before any work begins; a canceled request never appends a rule (#8).
+        if (cancellationToken.IsCancellationRequested)
+        {
+            return Task.FromCanceled(cancellationToken);
+        }
+
         if (scope == PersistScope.Once)
         {
             return Task.CompletedTask;
@@ -89,6 +108,14 @@ public sealed class FilePermissionStore : IPermissionStore
 
         lock (_lock)
         {
+            // Re-check under the lock: if the request was canceled while queued behind another writer, bail
+            // before touching disk. Once the atomic write starts it runs to completion so the temp+rename
+            // invariant is never left half-applied (#8).
+            if (cancellationToken.IsCancellationRequested)
+            {
+                return Task.FromCanceled(cancellationToken);
+            }
+
             var doc = RuleSetDocument.ReadForWrite(path!);
             doc.Add(ruleText, outcome);
             WriteAtomic(path!, doc.ToJson());
@@ -124,7 +151,7 @@ public sealed class FilePermissionStore : IPermissionStore
         merged.AddRange(_fileAndBuiltin);
         merged.AddRange(_session);
         merged.AddRange(_injected);
-        _merged = merged;
+        _merged = merged.AsReadOnly(); // hand out an immutable snapshot (#9)
     }
 
     private static PermissionRule Retag(PermissionRule rule, PermissionLayer layer) => new()

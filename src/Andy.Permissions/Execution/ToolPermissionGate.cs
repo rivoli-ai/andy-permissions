@@ -78,7 +78,15 @@ public sealed class ToolPermissionGate : IToolPermissionGate
                 return Denied(request.ToolId, evaluation, "consent cancelled");
             }
 
-            await PersistAsync(request.ToolId, evaluation, decision, cancellationToken).ConfigureAwait(false);
+            try
+            {
+                await PersistAsync(request.ToolId, evaluation, decision, cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                // Persistence was canceled mid-flight; the decision was validly obtained, so honor it for
+                // this call without remembering it. The store guarantees nothing was written (#8).
+            }
 
             if (decision.Allowed)
             {

@@ -21,9 +21,29 @@ zero approvals. Anything the injection didn't cover is denied (fail-closed) unle
 | `ANDY_PERMISSIONS_FILE` | Path to a JSON rules file to load as the highest-precedence **injected** layer. | 1 (wins) |
 | `ANDY_PERMISSIONS_JSON` | Inline JSON rules (used when `ANDY_PERMISSIONS_FILE` is unset). | 2 |
 | *(baked)* `/etc/andy/permissions.json` | Picked up automatically if present and neither env var is set. | 3 |
-| `ANDY_PERMISSION_MODE` | `fail-closed` (default — deny anything that would prompt) or `bypass` (turn Ask into Allow; **never** turns Deny into Allow). | — |
+| `ANDY_PERMISSION_MODE` | The baseline mode (see below). Defaults to `fail-closed`. | — |
 
 Only one injected source is used (no merge), so container behavior is predictable.
+
+## Modes (`ANDY_PERMISSION_MODE`)
+
+A mode is a **fallback shift**: it decides how an `Ask` is resolved when there is no interactive user to
+consult. **No mode can ever turn a `Deny` into an `Allow`** — Deny is resolved before a prompt is reached.
+In a headless/container host (`NonInteractivePermissionPrompt`), the modes resolve an `Ask` as follows:
+
+| Value | Aliases | Ask resolves to | Use |
+|---|---|---|---|
+| `fail-closed` | *(default; also any unrecognized value)* | **Deny** | Unattended/CI — deny anything not pre-approved by injection. |
+| `default` | | **Deny** (no TTY to ask) | The interactive baseline; headless it behaves like fail-closed. |
+| `plan` | | **Deny** | Read-only: nothing requiring consent proceeds. |
+| `accept-edits` | `accept_edits` | **Allow** iff every asked resource is a filesystem path, else **Deny** | Auto-approve in-scope file edits; still gate commands/network. |
+| `bypass` | `yolo` | **Allow** | Trusted sandbox (e.g. `--network=none`); still honors every Deny. |
+
+Values are case- and separator-insensitive (`-`, `_`, and space are equivalent).
+
+The **managed** layer (admin, uncoverable Deny) is discovered automatically at
+`/etc/andy/permissions.managed.json` (or `%ProgramData%\andy\permissions.managed.json` on Windows) — use it
+to bake absolute denies into a base image that no injected rule or mode can loosen.
 
 ## Rules file format
 
@@ -86,9 +106,10 @@ docker run --rm --network=none -e ANDY_PERMISSION_MODE=bypass my-andy-image andy
 
 `AddAndyPermissions(...)` (called by andy-cli/andy-engine hosts) constructs the `FilePermissionStore`
 and applies `PermissionInjectionBootstrap` at startup, which reads the env vars above and loads the
-`injected` layer. The default consent provider in a non-interactive host is
-`NonInteractivePermissionPrompt`, whose mode comes from `ANDY_PERMISSION_MODE`. See
-[`permission-spec.md`](permission-spec.md) §2.7–§2.9 for the full layering model.
+`injected` layer. The store also discovers the **managed** layer at its default path (above) unless the
+host sets `PermissionStoreOptions.ManagedFilePath` to another path or `null`. The default consent provider
+in a non-interactive host is `NonInteractivePermissionPrompt`, whose mode comes from
+`ANDY_PERMISSION_MODE`. See [`permission-spec.md`](permission-spec.md) §2.7–§2.9 for the full layering model.
 
 ## Verifying
 

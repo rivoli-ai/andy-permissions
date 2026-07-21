@@ -36,7 +36,11 @@ public sealed class ContainerInjectionDiTests
                 services.AddSingleton<IPermissionPrompt>(prompt);   // registered before AddAndyPermissions (TryAdd)
             }
 
-            services.AddAndyPermissions(o => o.UserFilePath = null); // injection drives policy
+            services.AddAndyPermissions(o =>
+            {
+                o.UserFilePath = null;    // injection drives policy
+                o.ManagedFilePath = null; // don't read the system managed default in tests
+            });
 
             await using var sp = services.BuildServiceProvider();
             var gate = sp.GetRequiredService<IToolPermissionGate>();
