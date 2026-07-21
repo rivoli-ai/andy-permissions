@@ -14,7 +14,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Andy.Tools" Version="2026.6.4-rc.24" />
+    <PackageReference Include="Andy.Tools" Version="2026.7.21-rc.84" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="8.0.2" />
   </ItemGroup>
 
