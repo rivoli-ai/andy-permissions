@@ -44,7 +44,8 @@ public static class ServiceCollectionExtensions
         });
         services.TryAddSingleton<IToolPermissionAuthorizer, ToolPermissionAuthorizer>();
 
-        // Default consent provider: non-interactive, fail-closed unless ANDY_PERMISSION_MODE=bypass.
+        // Default consent provider: non-interactive, driven by ANDY_PERMISSION_MODE (fail-closed default;
+        // default/plan also deny headless, accept-edits auto-allows in-scope file edits, bypass allows).
         services.TryAddSingleton<IPermissionPrompt>(_ =>
             new NonInteractivePermissionPrompt(PermissionInjectionBootstrap.ResolveMode()));
 

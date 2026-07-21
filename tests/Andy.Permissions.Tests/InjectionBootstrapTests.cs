@@ -71,6 +71,7 @@ public sealed class InjectionBootstrapTests : IDisposable
         var store = new Store.FilePermissionStore(new Store.PermissionStoreOptions
         {
             UserFilePath = null,
+            ManagedFilePath = null,
             Builtin = Array.Empty<PermissionRule>(),
         });
         store.SetInjectedRules(

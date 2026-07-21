@@ -9,10 +9,12 @@ namespace Andy.Permissions.Store;
 public sealed class PermissionStoreOptions
 {
     /// <summary>
-    /// Admin/enterprise-managed file (highest precedence; a managed Deny is uncoverable). Null by default
-    /// (opt-in); a host can point this at a system path such as <c>/etc/andy/permissions.managed.json</c>.
+    /// Admin/enterprise-managed file (highest precedence; a managed Deny is uncoverable). Defaults to the
+    /// platform managed path via <see cref="DefaultManagedFilePath"/> so a system administrator's policy is
+    /// discovered automatically; the file is optional (a missing file is treated as empty). Set an explicit
+    /// path to relocate it, or <c>null</c> to disable managed-layer discovery entirely.
     /// </summary>
-    public string? ManagedFilePath { get; set; }
+    public string? ManagedFilePath { get; set; } = DefaultManagedFilePath();
 
     /// <summary>Per-user file, default <c>~/.andy/permissions.json</c>.</summary>
     public string? UserFilePath { get; set; } = DefaultUserFilePath();
@@ -29,6 +31,16 @@ public sealed class PermissionStoreOptions
     /// <summary>Computes the default <c>~/.andy/permissions.json</c> path.</summary>
     public static string DefaultUserFilePath() =>
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".andy", "permissions.json");
+
+    /// <summary>
+    /// Computes the default admin-managed policy path per platform: <c>/etc/andy/permissions.managed.json</c>
+    /// on Unix/macOS, or <c>%ProgramData%\andy\permissions.managed.json</c> on Windows (both are
+    /// administrator-writable, user-read-only locations). The file is optional.
+    /// </summary>
+    public static string DefaultManagedFilePath() =>
+        OperatingSystem.IsWindows()
+            ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "andy", "permissions.managed.json")
+            : "/etc/andy/permissions.managed.json";
 
     /// <summary>Convenience: sets project + local file paths from a repo's <c>.andy</c> directory.</summary>
     public PermissionStoreOptions WithProjectDirectory(string repoRoot)

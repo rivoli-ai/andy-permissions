@@ -31,6 +31,39 @@ public sealed class PermissionRule
     public bool MatchesAnyTool => Tool == "*";
 
     /// <summary>
+    /// Validates a tool id against the documented grammar: the wildcard <c>*</c>, or a snake_case id — an
+    /// ASCII lowercase letter followed by lowercase letters, digits, or underscores (e.g. <c>read_file</c>).
+    /// Used to reject malformed identifiers at persistence time and to skip them when loading files.
+    /// </summary>
+    public static bool IsValidToolId(string? tool)
+    {
+        if (string.IsNullOrEmpty(tool))
+        {
+            return false;
+        }
+
+        if (tool == "*")
+        {
+            return true;
+        }
+
+        if (!char.IsAsciiLetterLower(tool[0]))
+        {
+            return false;
+        }
+
+        foreach (var c in tool)
+        {
+            if (!char.IsAsciiLetterLower(c) && !char.IsAsciiDigit(c) && c != '_')
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>
     /// Parses a rule from its textual form. <paramref name="text"/> may be <c>toolId(specifier)</c> or a
     /// bare <c>toolId</c> (⇒ specifier <c>*</c>). Throws <see cref="FormatException"/> on malformed input.
     /// </summary>
@@ -46,6 +79,11 @@ public sealed class PermissionRule
         if (open < 0)
         {
             // Bare tool id ⇒ matches any resource for that tool.
+            if (!IsValidToolId(trimmed))
+            {
+                throw new FormatException($"Permission rule '{text}' has an invalid tool id (expected snake_case or '*').");
+            }
+
             return new PermissionRule { Tool = trimmed, Specifier = "*", Outcome = outcome, Layer = layer };
         }
 
@@ -58,6 +96,11 @@ public sealed class PermissionRule
         if (tool.Length == 0)
         {
             throw new FormatException($"Permission rule '{text}' is missing a tool id before '('.");
+        }
+
+        if (!IsValidToolId(tool))
+        {
+            throw new FormatException($"Permission rule '{text}' has an invalid tool id '{tool}' (expected snake_case or '*').");
         }
 
         // Specifier is everything between the first '(' and the LAST ')', so specifiers may themselves

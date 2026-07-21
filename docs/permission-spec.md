@@ -89,7 +89,9 @@ A built-in classifier, used only for the no-explicit-rule fallback and as a safe
 
 ### 2.7 Layers & persistence
 Files mirror Claude Code's hierarchy:
-- **Managed** (admin, uncoverable): `/etc/andy/permissions.managed.json` (or platform equivalent).
+- **Managed** (admin, uncoverable): discovered **by default** at `/etc/andy/permissions.managed.json`
+  (or `%ProgramData%\andy\permissions.managed.json` on Windows). The file is optional; a host can relocate
+  it via `PermissionStoreOptions.ManagedFilePath` or set it to `null` to disable managed discovery.
 - **User**: `~/.andy/permissions.json`.
 - **Project**: `<repo>/.andy/permissions.json` (committed).
 - **Local**: `<repo>/.andy/permissions.local.json` (gitignored).
@@ -100,10 +102,19 @@ Files mirror Claude Code's hierarchy:
   chosen scope; config `deny` is never overridden by a persisted "always".
 
 ### 2.8 Modes (baseline presets) and the consent seam
-- **Modes** (Claude/Gemini/Qwen/Kimi consensus): `plan` (read-only), `default` (ask writes/exec),
-  `acceptEdits` (auto file edits in-scope), `yolo`/`bypass` (Ask→Allow, never Deny→Allow),
-  `failClosed` (Ask⇒Deny — for headless/CI). Modes are rule presets + a fallback shift, never able to
-  override Deny.
+- **Modes** (Claude/Gemini/Qwen/Kimi consensus) are a **fallback shift**: they decide how an `Ask` is
+  resolved when there is no interactive user to consult, and **can never turn a `Deny` into an `Allow`**
+  (Deny is resolved by the authorizer before a prompt is reached). The `PermissionMode` enum and
+  `NonInteractivePermissionPrompt.ResolveAsk` are the public API; headless resolution of an `Ask`:
+  - `failClosed` ⇒ Deny (the default; also any unrecognized `ANDY_PERMISSION_MODE`).
+  - `default` ⇒ Deny with no TTY (the interactive baseline: ask writes/exec when a user is present).
+  - `plan` ⇒ Deny (read-only; nothing needing consent proceeds).
+  - `acceptEdits` ⇒ Allow when every asked resource is a filesystem path (in-scope file edit), else Deny.
+  - `yolo`/`bypass` ⇒ Allow (trusted sandbox), still honoring every Deny.
+
+  Interactive hosts supply their own `IPermissionPrompt` and apply the same shift (e.g. `default` asks,
+  `plan` denies writes, `acceptEdits` auto-approves file edits). Env parsing accepts `-`/`_`/space
+  interchangeably and is case-insensitive.
 - **Consent seam** `IPermissionPrompt` (host-supplied): interactive TUI, non-interactive policy
   (container), or a future remote broker. Decisions: Allow/Deny + persist scope + **optional feedback**
   to the model (Kimi/opencode reject-with-feedback). Prompts are **serialized** and **re-checked** under
@@ -134,8 +145,8 @@ future `IPolicyHook` running ahead of the authorizer.
 | **Symlink-aware deny** | ❌ (documented TOCTOU) | **ADD** |
 | **`//` absolute path prefix** | partial (`/`=abs) | **ADD `//`** |
 | **Reject-with-feedback** | ❌ | **ADD field** |
-| **Managed (uncoverable) layer** | ❌ | **ADD layer + file** |
-| Mode presets (plan/default/acceptEdits/yolo/failClosed) | partial (failClosed/bypass prompts) | **ADD presets + helper** |
+| **Managed (uncoverable) layer** | ❌ | ✅ added — **discovered by default** at the platform managed path (§2.7) |
+| Mode presets (plan/default/acceptEdits/yolo/failClosed) | partial (failClosed/bypass prompts) | ✅ added — full mode set as a fallback shift, never overriding Deny (§2.8) |
 | Virtual shell-op extraction (cat/curl inside bash → Read/WebFetch rules) | ❌ | document (future) |
 | OS sandbox (seatbelt/bwrap) | n/a (container model) | document (Phase 4) |
 | PreToolUse policy hook | ❌ | document (future) |

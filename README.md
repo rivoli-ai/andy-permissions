@@ -47,8 +47,9 @@ writes, scope network hosts, and require confirmation for destructive operations
   over broad allows. Argument-audited so `git -c`, `find -exec`, `sed -i`, `rg --pre` are not "safe".
 - A precedence model where **Deny is absolute**, otherwise the highest-precedence layer wins, otherwise a
   tool-metadata fallback.
-- Layered, corruption-resilient file store: **managed** (admin, uncoverable), user, project, local,
-  session, and injected layers with atomic writes.
+- Layered, corruption-resilient file store: **managed** (admin, uncoverable — discovered by default at
+  `/etc/andy/permissions.managed.json`, or `%ProgramData%\andy\permissions.managed.json` on Windows), user,
+  project, local, session, and injected layers with atomic writes.
 - A pluggable consent seam (`IPermissionPrompt`) with a non-interactive provider for headless and
   container use (fail-closed or bypass), and **reject-with-feedback** surfaced back to the model.
 - A decorating `IToolExecutor` that enforces decisions in front of any executor, plus dependency
@@ -79,8 +80,14 @@ For unattended runs, inject the rules up front so no consent is ever requested:
 
 - `ANDY_PERMISSIONS_FILE` - path to a JSON rules file to load as the highest-precedence layer.
 - `ANDY_PERMISSIONS_JSON` - inline JSON rules (used when no file is set).
-- `ANDY_PERMISSION_MODE` - `fail-closed` (default; denies anything not pre-allowed) or `bypass`
-  (turns Ask into Allow; never affects Deny).
+- `ANDY_PERMISSION_MODE` - the baseline mode. A mode is a *fallback shift* over `Ask` (it never turns a
+  `Deny` into an `Allow`). Headless resolution:
+  - `fail-closed` (default, and any unrecognized value) - `Ask` ⇒ Deny; denies anything not pre-allowed.
+  - `default` - the interactive baseline; with no TTY it denies like fail-closed.
+  - `plan` - read-only; `Ask` ⇒ Deny (nothing needing consent proceeds).
+  - `accept-edits` - `Ask` ⇒ Allow when every asked resource is a filesystem path (in-scope file edit),
+    else Deny.
+  - `bypass` (alias `yolo`) - `Ask` ⇒ Allow; still honors every Deny.
 
 Rules file shape:
 
