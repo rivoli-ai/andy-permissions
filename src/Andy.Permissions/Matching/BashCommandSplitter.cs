@@ -457,6 +457,18 @@ public static class BashCommandSplitter
                 continue;
             }
 
+            // A bare '&' separates commands (background job) EXCEPT when it belongs to a
+            // file-descriptor duplication - "2>&1", ">&2", "<&0", "&>log". Splitting there cut
+            // "dotnet build ... 2>&1" into "dotnet build ... 2>" plus a phantom command "1", which
+            // was then authorized on its own: it matches no rule, so an idiom present in a large
+            // share of real command lines forced a prompt for a command the user never wrote.
+            if (c == '&' && IsRedirectionAmpersand(text, i))
+            {
+                current.Append(c);
+                i++;
+                continue;
+            }
+
             if (c is ';' or '|' or '&' or '\n')
             {
                 Flush(current, segments);
@@ -567,6 +579,34 @@ public static class BashCommandSplitter
         }
 
         return -1;
+    }
+
+    /// <summary>
+    /// Whether the '&amp;' at <paramref name="index"/> is part of a file-descriptor duplication
+    /// rather than a command separator.
+    ///
+    /// Two shapes qualify. The '&amp;' follows a redirection operator, optionally with a file
+    /// descriptor in front of it - <c>2&gt;&amp;1</c>, <c>&gt;&amp;2</c>, <c>&lt;&amp;0</c>,
+    /// <c>2&gt;&gt;&amp;1</c> - or it precedes one, as in <c>&amp;&gt;log</c> and
+    /// <c>&amp;&gt;&gt;log</c>. Everything else is a separator, including a genuine background
+    /// <c>&amp;</c>, which must keep splitting.
+    /// </summary>
+    private static bool IsRedirectionAmpersand(string text, int index)
+    {
+        // "&>" / "&>>": the ampersand opens the redirection.
+        if (index + 1 < text.Length && text[index + 1] == '>')
+        {
+            return true;
+        }
+
+        // ">&" / "<&", possibly preceded by a file descriptor ("2>&1") or doubled (">>&").
+        int j = index - 1;
+        if (j < 0)
+        {
+            return false;
+        }
+
+        return text[j] == '>' || text[j] == '<';
     }
 
     private static void Flush(StringBuilder current, List<string> segments)

@@ -150,4 +150,56 @@ public class BashCommandSplitterTests
         var seg = BashCommandSplitter.Split(cmd).Segments[0];
         Assert.Equal(expected, seg.HasRedirection);
     }
+
+    // A bare '&' separates commands, but the '&' in a file-descriptor duplication does not.
+    // Splitting there produced a phantom segment - "dotnet build ... 2>&1" became
+    // "dotnet build ... 2>" plus a command called "1" - which is authorized on its own, matches
+    // no rule, and so forces a prompt for a command the user never wrote. The idiom appears in a
+    // large share of real command lines.
+
+    [Theory]
+    [InlineData("dotnet build --nologo 2>&1", "dotnet build --nologo 2>&1")]
+    [InlineData("grep x file 2>&1", "grep x file 2>&1")]
+    [InlineData("cmd >&2", "cmd >&2")]
+    [InlineData("cmd <&0", "cmd <&0")]
+    [InlineData("cmd 2>>&1", "cmd 2>>&1")]
+    [InlineData("cmd &>log", "cmd &>log")]
+    [InlineData("cmd &>>log", "cmd &>>log")]
+    public void Redirection_ampersand_is_not_a_separator(string cmd, string expected)
+    {
+        var segs = Seg(cmd);
+
+        Assert.Single(segs);
+        Assert.Equal(expected, segs[0]);
+    }
+
+    [Fact]
+    public void Redirection_ampersand_survives_alongside_a_pipe()
+    {
+        var segs = Seg("dotnet build --nologo 2>&1 | tail -5");
+
+        Assert.Equal(2, segs.Count);
+        Assert.Equal("dotnet build --nologo 2>&1", segs[0]);
+        Assert.Equal("tail -5", segs[1]);
+        Assert.False(Has(segs, "1"), "the redirected descriptor must not become its own command");
+    }
+
+    [Fact]
+    public void Background_ampersand_still_splits()
+    {
+        // The fix must not stop a genuine background operator from separating commands.
+        var segs = Seg("ls & rm -rf /");
+
+        Assert.True(Has(segs, "ls"));
+        Assert.True(Has(segs, "rm -rf /"));
+    }
+
+    [Fact]
+    public void Redirection_ampersand_does_not_hide_a_following_command()
+    {
+        var segs = Seg("cmd 2>&1 && rm -rf /");
+
+        Assert.True(Has(segs, "cmd 2>&1"));
+        Assert.True(Has(segs, "rm -rf /"), "a chained destructive command must still be authorized");
+    }
 }
