@@ -60,7 +60,7 @@ The full cross-tool best-of-breed specification and gap analysis is in
 
 ## Requirements
 
-- .NET 8.0 SDK
+- .NET 10.0 SDK
 
 ## Build and test
 
