@@ -73,3 +73,4 @@ container/rootfs-safe/
 *.VisualState.xml
 TestResult.xml
 nunit-*.xml
+.coord/state/
