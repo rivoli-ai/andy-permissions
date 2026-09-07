@@ -77,4 +77,26 @@ public sealed class HardeningStoreTests : IDisposable
             new Dictionary<string, object?> { ["file_path"] = link });
         Assert.Equal(PermissionOutcome.Deny, auth.Evaluate(ctx).Outcome);
     }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void Deny_follows_parent_directory_symlink(bool fileExists)
+    {
+        if (OperatingSystem.IsWindows()) return;
+        var secretDirectory = Path.Combine(_dir, "private");
+        Directory.CreateDirectory(secretDirectory);
+        var linkDirectory = Path.Combine(_dir, "public-link");
+        Directory.CreateSymbolicLink(linkDirectory, secretDirectory);
+        if (fileExists) File.WriteAllText(Path.Combine(secretDirectory, "data.txt"), "secret");
+
+        var store = new ListPermissionStore()
+            .Add($"write_file({secretDirectory}/**)", PermissionOutcome.Deny, PermissionLayer.Managed)
+            .Add("write_file(*)", PermissionOutcome.Allow, PermissionLayer.User);
+        var auth = new ToolPermissionAuthorizer(store, new DefaultToolActionResolver());
+        var ctx = new ToolAuthorizationContext("write_file",
+            new Dictionary<string, object?> { ["file_path"] = Path.Combine(linkDirectory, "data.txt") });
+
+        Assert.Equal(PermissionOutcome.Deny, auth.Evaluate(ctx).Outcome);
+    }
 }

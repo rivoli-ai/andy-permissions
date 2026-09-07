@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.RegularExpressions;
 using Andy.Permissions.Model;
+using Andy.Tools.Library.Common;
 
 namespace Andy.Permissions.Matching;
 
@@ -89,8 +90,9 @@ public static class SpecifierMatcher
     }
 
     /// <summary>
-    /// Resolves a path's real (symlink-followed) location, normalized, or null if it doesn't exist or
-    /// can't be resolved. Used for symlink-aware Deny matching (so a symlink inside an allowed directory
+    /// Resolves a path's real (symlink-followed) location, normalized, or null if it
+    /// can't be resolved. Existing parent links are resolved even for new files.
+    /// Used for symlink-aware Deny matching (so a symlink inside an allowed directory
     /// that points at a denied secret is still blocked).
     /// </summary>
     public static string? ResolveRealPath(string value, string? workingDirectory)
@@ -103,24 +105,14 @@ public static class SpecifierMatcher
 
         try
         {
-            if (File.Exists(norm))
-            {
-                var fi = new FileInfo(norm);
-                return UnifySeparators(fi.ResolveLinkTarget(returnFinalTarget: true)?.FullName ?? fi.FullName);
-            }
-
-            if (Directory.Exists(norm))
-            {
-                var di = new DirectoryInfo(norm);
-                return UnifySeparators(di.ResolveLinkTarget(returnFinalTarget: true)?.FullName ?? di.FullName);
-            }
+            // Share the execution layer's component-by-component resolver.
+            // ResolveLinkTarget on the leaf alone misses directory symlinks.
+            return UnifySeparators(ToolHelpers.ResolveRealPath(norm));
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
         {
             return null;
         }
-
-        return null;
     }
 
     private static string ExpandHome(string path)
