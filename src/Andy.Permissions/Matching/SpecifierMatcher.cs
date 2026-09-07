@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.RegularExpressions;
 using Andy.Permissions.Model;
+using Andy.Tools.Library.Common;
 
 namespace Andy.Permissions.Matching;
 
@@ -89,8 +90,9 @@ public static class SpecifierMatcher
     }
 
     /// <summary>
-    /// Resolves a path's real (symlink-followed) location, normalized, or null if it doesn't exist or
-    /// can't be resolved. Used for symlink-aware Deny matching (so a symlink inside an allowed directory
+    /// Resolves a path's real (symlink-followed) location, normalized, or null if it
+    /// can't be resolved. Existing parent links are resolved even for new files.
+    /// Used for symlink-aware Deny matching (so a symlink inside an allowed directory
     /// that points at a denied secret is still blocked).
     /// </summary>
     public static string? ResolveRealPath(string value, string? workingDirectory)
@@ -103,24 +105,39 @@ public static class SpecifierMatcher
 
         try
         {
-            if (File.Exists(norm))
-            {
-                var fi = new FileInfo(norm);
-                return UnifySeparators(fi.ResolveLinkTarget(returnFinalTarget: true)?.FullName ?? fi.FullName);
-            }
-
-            if (Directory.Exists(norm))
-            {
-                var di = new DirectoryInfo(norm);
-                return UnifySeparators(di.ResolveLinkTarget(returnFinalTarget: true)?.FullName ?? di.FullName);
-            }
+            // Share the execution layer's component-by-component resolver.
+            // ResolveLinkTarget on the leaf alone misses directory symlinks.
+            return UnifySeparators(ToolHelpers.ResolveRealPath(norm));
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
         {
             return null;
         }
+    }
 
-        return null;
+    /// <summary>
+    /// Matches a deny against a resolved resource, resolving the rule's literal
+    /// directory prefix too (for example macOS /var versus /private/var).
+    /// Wildcard segments are preserved and Allow rules remain lexical.
+    /// </summary>
+    public static bool MatchResolvedDenyPath(string specifier, string realPath, string? workingDirectory)
+    {
+        if (MatchPath(specifier, realPath, workingDirectory))
+        {
+            return true;
+        }
+
+        var normalized = NormalizeSpecifierPath(specifier, workingDirectory);
+        var wildcard = normalized.IndexOfAny(['*', '?']);
+        var prefixEnd = wildcard < 0 ? normalized.Length : normalized.LastIndexOf('/', wildcard);
+        if (prefixEnd <= 0)
+        {
+            return false;
+        }
+
+        var resolvedPrefix = ResolveRealPath(normalized[..prefixEnd], workingDirectory: null);
+        return resolvedPrefix is not null
+            && MatchPath(resolvedPrefix.TrimEnd('/') + normalized[prefixEnd..], realPath, workingDirectory: null);
     }
 
     private static string ExpandHome(string path)
