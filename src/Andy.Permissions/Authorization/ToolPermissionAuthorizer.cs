@@ -93,7 +93,7 @@ public sealed class ToolPermissionAuthorizer : IToolPermissionAuthorizer
                 {
                     if (rule.Outcome == PermissionOutcome.Deny
                         && !literalMatches.Contains(rule)
-                        && SpecifierMatcher.MatchPath(rule.Specifier, realPath, workingDirectory: null))
+                        && SpecifierMatcher.MatchResolvedDenyPath(rule.Specifier, realPath, context.WorkingDirectory))
                     {
                         denies.Add(rule);
                     }

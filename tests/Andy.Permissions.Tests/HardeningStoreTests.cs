@@ -99,4 +99,24 @@ public sealed class HardeningStoreTests : IDisposable
 
         Assert.Equal(PermissionOutcome.Deny, auth.Evaluate(ctx).Outcome);
     }
+
+    [Theory]
+    [InlineData("private/**")]
+    [InlineData("private/data.txt")]
+    public void Deny_rule_under_directory_alias_matches_canonical_resource(string pattern)
+    {
+        if (OperatingSystem.IsWindows()) return;
+        var target = Path.Combine(_dir, "private");
+        Directory.CreateDirectory(target);
+        var alias = Path.Combine(_dir, "alias");
+        Directory.CreateSymbolicLink(alias, _dir);
+        var store = new ListPermissionStore()
+            .Add($"write_file({pattern})", PermissionOutcome.Deny, PermissionLayer.Managed)
+            .Add("write_file(*)", PermissionOutcome.Allow, PermissionLayer.User);
+        var auth = new ToolPermissionAuthorizer(store, new DefaultToolActionResolver());
+        var ctx = new ToolAuthorizationContext("write_file",
+            new Dictionary<string, object?> { ["file_path"] = Path.Combine(target, "data.txt") },
+            WorkingDirectory: alias);
+        Assert.Equal(PermissionOutcome.Deny, auth.Evaluate(ctx).Outcome);
+    }
 }

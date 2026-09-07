@@ -115,6 +115,31 @@ public static class SpecifierMatcher
         }
     }
 
+    /// <summary>
+    /// Matches a deny against a resolved resource, resolving the rule's literal
+    /// directory prefix too (for example macOS /var versus /private/var).
+    /// Wildcard segments are preserved and Allow rules remain lexical.
+    /// </summary>
+    public static bool MatchResolvedDenyPath(string specifier, string realPath, string? workingDirectory)
+    {
+        if (MatchPath(specifier, realPath, workingDirectory))
+        {
+            return true;
+        }
+
+        var normalized = NormalizeSpecifierPath(specifier, workingDirectory);
+        var wildcard = normalized.IndexOfAny(['*', '?']);
+        var prefixEnd = wildcard < 0 ? normalized.Length : normalized.LastIndexOf('/', wildcard);
+        if (prefixEnd <= 0)
+        {
+            return false;
+        }
+
+        var resolvedPrefix = ResolveRealPath(normalized[..prefixEnd], workingDirectory: null);
+        return resolvedPrefix is not null
+            && MatchPath(resolvedPrefix.TrimEnd('/') + normalized[prefixEnd..], realPath, workingDirectory: null);
+    }
+
     private static string ExpandHome(string path)
     {
         if (path == "~")
